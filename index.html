@@ -1,0 +1,206 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <title>Smart Tracker</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />    
+    <link href="https://protopiaempire.com/img/protopia-favicon.png" rel="shortcut icon" type="image/x-icon" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>   
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">  
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    
+<style>
+      :root { --primary: #1a2980; --danger: #e53e3e; --success: #48bb78; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: 'Open Sans', sans-serif; background: #f4f7f6; color: #333; overflow-x: hidden; }
+      .header { background: linear-gradient(135deg, var(--primary) 0%, #26d0ce 100%); padding: 15px; color: white; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+      h1 { font-family: 'Bebas Neue', sans-serif; font-size: 1.8rem; }
+      #map { height: 350px; width: 100%; z-index: 1; }
+      .content { padding: 15px; max-width: 600px; margin: 0 auto; }
+      .legend-bar { background: white; padding: 10px; display: flex; justify-content: center; gap: 20px; font-size: 0.8rem; border-bottom: 1px solid #ddd; }
+      .legend-item { display: flex; align-items: center; gap: 6px; }
+      .dot { width: 12px; height: 12px; border-radius: 50%; }
+      .dot.user { background: var(--primary); border: 2px solid white; box-shadow: 0 0 2px black; }
+      .dot.vest { background: var(--danger); }
+      .status-box { background: #ebfaf0; border: 1px solid #c6f6d5; padding: 8px; border-radius: 8px; text-align: center; font-size: 0.75rem; margin-bottom: 15px; }
+      .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+      .card { background: white; padding: 12px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+      .card.emergency { background: #fff5f5; border: 2px solid var(--danger); animation: pulse 1.5s infinite; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+      .label { font-size: 0.65rem; color: #666; font-weight: bold; text-transform: uppercase; }
+      .val { font-family: monospace; font-size: 0.8rem; margin-top: 4px; }
+      .dist-card { grid-column: span 2; background: var(--primary); color: white; padding: 15px; text-align: center; border-radius: 10px; }
+      .dist-val { font-size: 2rem; font-family: 'Bebas Neue'; }
+      .btn-refresh { background: var(--primary); color: white; border: none; width: 100%; padding: 15px; border-radius: 10px; font-weight: bold; cursor: pointer; margin-bottom: 10px; }
+      .btn-secondary { background: #636e72; color: white; border: none; width: 100%; padding: 10px; border-radius: 8px; font-size: 0.8rem; margin-bottom: 30px; cursor: pointer; }
+      .btn-active { background: #00b894; }
+      @media (min-width: 768px) { #map { height: 500px; } }
+    </style>
+</head>
+
+<body onload="initApp();">
+
+    <div class="header">
+        <h1 id="notificationBadge">SMART TRACKER</h1>
+    </div>
+
+    <div class="legend-bar">
+        <div class="legend-item"><div class="dot user"></div> Your Position</div>
+        <div class="legend-item"><div class="dot vest"></div> Tracker Location</div>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="content">
+        <div class="status-box">
+            <i class="fa fa-circle" style="color:var(--success)"></i> Tracking Live
+        </div>
+
+        <div class="info-grid">
+            <div class="card">
+                <div class="label">My Coordinates</div>
+                <div class="val" id="val1">...</div>
+                <div class="val" id="val2">...</div>
+            </div>
+            <div class="card" id="vestLocationCard">
+                <div class="label">Tracker Coordinates</div>
+                <div class="val" id="gpsLatTxt">...</div>
+                <div class="val" id="gpsLngTxt">...</div>
+            </div>
+            <div class="dist-card">
+                <div class="label" style="color:rgba(255,255,255,0.7)">Distance to Tracker</div>
+                <div class="dist-val"><span id="distance">0</span> <span style="font-size:1rem">km</span></div>
+            </div>
+        </div>
+
+        <button class="btn-refresh" onclick="resetMapView();">
+            <i class="fa fa-crosshairs"></i> CENTER VIEW
+        </button>
+        
+        <button id="followBtn" class="btn-secondary btn-active" onclick="toggleFollow()">
+            FOLLOW MODE: ON
+        </button>
+    </div>
+
+    <script>
+      var gpsLat, gpsLng, switchState;
+      var userMarker, assetMarker, connectionLine;
+      var followMode = true;
+      var mapInitialized = false;
+
+      var urlLat = 'https://script.google.com/macros/s/AKfycbztO9ULtjxFjACSQEBlFkTYfnD-6vT9ArQJyRTnVypg8C-YEjMKElMBD_LY1GSqMd5e/exec?func=GetLat';
+      var urlLng = 'https://script.google.com/macros/s/AKfycbztO9ULtjxFjACSQEBlFkTYfnD-6vT9ArQJyRTnVypg8C-YEjMKElMBD_LY1GSqMd5e/exec?func=GetLng';
+      var urlSw = 'https://script.google.com/macros/s/AKfycbztO9ULtjxFjACSQEBlFkTYfnD-6vT9ArQJyRTnVypg8C-YEjMKElMBD_LY1GSqMd5e/exec?func=GetEmergency';
+
+      // Initialize Map once
+      var map = L.map('map').setView([0,0], 13);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OS' }).addTo(map);
+
+      function initApp() {
+        getLocation();
+        setInterval(repeatCall, 1000);
+      }
+
+      function getLat(){ $.post( urlLat, function( data ) { gpsLat = data; document.getElementById('gpsLatTxt').innerHTML = gpsLat; })}
+      function getLng(){ $.post( urlLng, function( data ) { gpsLng = data; document.getElementById('gpsLngTxt').innerHTML = gpsLng; })}
+      
+      function getEmergency(){
+        $.post( urlSw, function( data ) {
+          switchState = data;
+          if(switchState === '1') {
+            document.getElementById('vestLocationCard').classList.add('emergency');
+            document.getElementById('notificationBadge').innerHTML = "⚠️ EMERGENCY ALERT";
+          } else {
+            document.getElementById('vestLocationCard').classList.remove('emergency');
+            document.getElementById('notificationBadge').innerHTML = "SMART TRACKER";
+          }
+        })
+      }
+
+      function updateMarkerPositions() {
+        var uLat = parseFloat(document.getElementById('val1').innerHTML);
+        var uLng = parseFloat(document.getElementById('val2').innerHTML);
+        var tLat = parseFloat(gpsLat);
+        var tLng = parseFloat(gpsLng);
+
+        if (isNaN(uLat) || isNaN(tLat)) return;
+
+        var userCoords = [uLat, uLng];
+        var targetCoords = [tLat, tLng];
+
+        // Update User Marker
+        if (!userMarker) {
+          userMarker = L.marker(userCoords).addTo(map);
+          userMarker.setIcon(L.divIcon({
+            className: 'user-marker',
+            html: '<div style="background:#1a2980;width:18px;height:18px;border-radius:50%;border:2px solid white;box-shadow:0 0 5px rgba(0,0,0,0.5);"></div>',
+            iconSize: [18, 18]
+          }));
+        } else { userMarker.setLatLng(userCoords); }
+
+        // Update Asset Marker
+        if (!assetMarker) {
+          assetMarker = L.circle(targetCoords, { color: 'red', fillColor: '#f03', fillOpacity: 0.5, radius: 10 }).addTo(map);
+        } else { assetMarker.setLatLng(targetCoords); }
+
+        // Update Line
+        var path = [userCoords, targetCoords];
+        if (!connectionLine) {
+          connectionLine = L.polyline(path, { color: '#0984e3', weight: 3, opacity: 0.6, dashArray: '10, 10' }).addTo(map);
+        } else { connectionLine.setLatLngs(path); }
+
+        // Update Distance
+        var dist = (userMarker.getLatLng().distanceTo(assetMarker.getLatLng()) / 1000).toFixed(2);
+        document.getElementById('distance').innerHTML = dist;
+
+        if (followMode) { resetMapView(); }
+      }
+
+      function resetMapView() {
+        if (userMarker && assetMarker) {
+          var group = new L.featureGroup([userMarker, assetMarker]);
+          map.fitBounds(group.getBounds().pad(0.3));
+        }
+      }
+
+      function repeatCall(){
+        getLat(); getLng(); getEmergency(); onStart();
+        updateMarkerPositions();
+      }
+
+      var count = '0';
+      function onStart(){
+        navigator.serviceWorker.register('sw.js');
+        Notification.requestPermission(function(result) {
+          if (result === 'granted' && switchState === '1' && count !== '1'){
+            navigator.serviceWorker.ready.then(function(reg) {
+              reg.showNotification('Emergency at '+gpsLat+","+gpsLng);
+              count = '1';
+            });
+          }
+          if(switchState === '0') count = '0';
+        });
+      }
+
+      function getLocation() {
+        if (navigator.geolocation) {
+          navigator.geolocation.watchPosition(function(position) {
+            document.getElementById('val1').innerHTML = position.coords.latitude.toFixed(5);
+            document.getElementById('val2').innerHTML = position.coords.longitude.toFixed(5);
+          });
+        }
+      }
+
+      function toggleFollow() {
+        followMode = !followMode;
+        var btn = document.getElementById('followBtn');
+        btn.innerHTML = followMode ? "FOLLOW MODE: ON" : "FOLLOW MODE: OFF";
+        btn.classList.toggle('btn-active');
+      }
+    </script>
+</body>
+</html>
